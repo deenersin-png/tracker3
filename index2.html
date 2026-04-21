@@ -483,9 +483,9 @@ function buildFoundMode(cl, anim) {
   });
 
   if (leaders.length > 0)
-    h += '<div class="section-label' + (anim ? ' fade-in' : '') + '">● YOU</div>';
+    h += '<div class="section-label' + (anim ? ' fade-in' : '') + '">● Selected Bus</div>';
 
-  h += buildNode(you, 'you', 'YOU', idx++, anim, null, null);
+  h += buildNode(you, 'you', 'Selected Bus', idx++, anim, null, null);
 
   if (followers.length > 0)
     h += '<div class="section-label' + (anim ? ' fade-in' : '') + '" style="padding-top:4px">↓ Behind · ' + followers.length + '</div>';
