@@ -334,8 +334,49 @@ function parseTVData(raw) {
   });
 }
 
-async function fetchTV(route) {
-  return parseTVData(await fetchWithTimeout(API.tv(route)));
+// TransitView requires JSONP — SEPTA does not send CORS headers for this endpoint
+const TV_ENDPOINTS = [
+  r => `https://www3.septa.org/api/TransitView/index.php?route=${encodeURIComponent(r)}&callback=`,
+  r => `https://www3.septa.org/hackathon/TransitView/?route=${encodeURIComponent(r)}&callback=`,
+  r => `https://www3.septa.org/beta/TransitView/?route=${encodeURIComponent(r)}&callback=`,
+];
+
+function fetchTV(route) {
+  return new Promise((resolve, reject) => {
+    tryJSONP(route, TV_ENDPOINTS, 0, resolve, reject);
+  });
+}
+
+function tryJSONP(route, endpoints, idx, resolve, reject) {
+  if (idx >= endpoints.length) { reject(new Error('All endpoints failed')); return; }
+
+  const cb   = 'septa_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6);
+  const el   = document.createElement('script');
+  let done   = false;
+
+  function cleanup() {
+    if (done) return; done = true;
+    try { delete window[cb]; } catch(e) {}
+    if (el.parentNode) el.parentNode.removeChild(el);
+  }
+
+  const timer = setTimeout(() => {
+    if (!done) { cleanup(); tryJSONP(route, endpoints, idx + 1, resolve, reject); }
+  }, FETCH_TIMEOUT_MS);
+
+  window[cb] = function(data) {
+    clearTimeout(timer);
+    if (done) return;
+    cleanup();
+    resolve(parseTVData(data));
+  };
+
+  el.src = endpoints[idx](route) + cb;
+  el.onerror = function() {
+    clearTimeout(timer);
+    if (!done) { cleanup(); tryJSONP(route, endpoints, idx + 1, resolve, reject); }
+  };
+  document.head.appendChild(el);
 }
 
 async function safeGet(url) {
