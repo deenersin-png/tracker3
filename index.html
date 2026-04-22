@@ -108,7 +108,7 @@ body{min-height:100%;background:var(--bg);font-family:'Inter',-apple-system,syst
 .bus-node.you .block-num{color:var(--accent)}
 .bus-node.my-leader .block-num{color:var(--orange)}
 .bus-node.layover .block-num{color:var(--yellow)}
-.vehicle-num{display:flex;align-items:center;gap:4px;font-size:15px;font-weight:700;color:var(--text-dim);margin-left:auto;background:var(--border);padding:3px 9px;border-radius:5px}
+.vehicle-num{display:flex;align-items:center;gap:4px;font-size:15px;font-weight:700;color:var(--text-dim);margin-left:8px;background:var(--border);padding:3px 9px;border-radius:5px}
 .vehicle-num svg{width:14px;height:14px;fill:currentColor;flex-shrink:0}
 
 .node-row2{display:flex;align-items:center;gap:7px;margin-top:7px;flex-wrap:wrap}
@@ -122,7 +122,7 @@ body{min-height:100%;background:var(--bg);font-family:'Inter',-apple-system,syst
 .seat-tag.many{background:var(--green-dim);color:var(--green)}
 .seat-tag.few{background:var(--yellow-dim);color:var(--yellow)}
 .seat-tag.standing,.seat-tag.full{background:var(--red-dim);color:var(--red)}
-.stop-name{font-size:12px;color:var(--text-faint);font-weight:500;margin-left:auto;max-width:45%;text-align:right;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.stop-name{font-size:12px;color:var(--text-faint);font-weight:500;flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 
 /* HEADWAY ROW */
 .headway-row{display:flex;align-items:center;gap:7px;margin-top:7px;padding-top:7px;border-top:1px solid var(--border);font-size:12px;color:var(--text-dim)}
@@ -136,11 +136,28 @@ body{min-height:100%;background:var(--bg);font-family:'Inter',-apple-system,syst
 .layover-timer{font-size:13px;font-weight:700;color:var(--yellow);font-variant-numeric:tabular-nums}
 
 /* RUN TAG */
-.run-tag{display:inline-flex;align-items:center;font-size:12px;font-weight:700;padding:3px 9px;border-radius:5px;background:var(--purple-dim);color:var(--purple);border:1px solid rgba(188,140,255,.25);text-decoration:none;white-space:nowrap;touch-action:manipulation}
+.run-tag{display:inline-flex;align-items:center;font-size:12px;font-weight:700;padding:3px 9px;border-radius:5px;background:var(--purple-dim);color:var(--purple);border:1px solid rgba(188,140,255,.25);text-decoration:none;white-space:nowrap;touch-action:manipulation;flex-shrink:0;margin-left:auto}
+
+/* BOTTOM ROW (location + run#) */
+.node-bottom{display:flex;align-items:center;gap:7px;margin-top:7px;padding-top:7px;border-top:1px solid var(--border)}
+
+/* PULLOFF ROW */
+.pulloff-row{display:flex;align-items:center;gap:8px;margin-top:5px;font-size:12px;color:var(--text-dim)}
+.pulloff-time{font-size:14px;font-weight:800;color:var(--accent);font-variant-numeric:tabular-nums}
+
+/* NEIGHBOR ITEMS (leader above row1, follower below row1) */
+.neighbor-item{display:flex;align-items:center;gap:6px;font-size:12px}
+.neighbor-item.leader-n{padding-bottom:7px;margin-bottom:7px;border-bottom:1px solid var(--border)}
+.neighbor-item.follower-n{padding-top:7px;margin-top:7px;border-top:1px solid var(--border)}
+.neighbor-label{font-size:11px;font-weight:700;padding:2px 7px;border-radius:4px;min-width:72px;text-align:center;letter-spacing:.03em;text-transform:uppercase}
+.leader-n .neighbor-label{background:var(--orange-dim);color:var(--orange)}
+.follower-n .neighbor-label{background:var(--purple-dim);color:var(--purple)}
+.neighbor-blk{font-size:13px;font-weight:800;color:var(--text)}
+.neighbor-bus{font-size:12px;font-weight:600;color:var(--text-dim)}
 a.run-tag:active{opacity:.7}
 
 /* SECTION LABELS */
-.section-label{padding:8px 0 6px 50px;font-size:12px;font-weight:700;color:var(--text-faint);letter-spacing:.06em;text-transform:uppercase}
+.section-label{padding:10px 16px 8px;font-size:15px;font-weight:800;color:var(--text);letter-spacing:.04em;text-transform:uppercase;text-align:center;border-top:1px solid var(--border);border-bottom:1px solid var(--border);background:var(--card);margin:4px 0}
 
 /* MESSAGES */
 .msg{text-align:center;padding:50px 20px;color:var(--text-dim)}
@@ -556,22 +573,26 @@ function buildFoundMode(cl, anim) {
     const label = isImm ? 'LEADING BUS' : 'LEADING BUS +' + (leaders.length - i);
     const hw = isImm && !bus._isLayover && !you._isLayover
       ? (bus.next_stop_sequence || 0) - (you.next_stop_sequence || 0) : null;
-    h += buildNode(bus, role, label, idx++, anim, hw, null);
+    const aL = i > 0 ? leaders[i - 1] : null;
+    const aF = i < leaders.length - 1 ? leaders[i + 1] : you;
+    h += buildNode(bus, role, label, idx++, anim, hw, null, aL, aF);
   });
 
   if (leaders.length > 0)
     h += '<div class="section-label' + (anim ? ' fade-in' : '') + '">● Selected Bus</div>';
 
-  h += buildNode(you, 'you', 'Selected Bus', idx++, anim, null, null);
+  h += buildNode(you, 'you', 'Selected Bus', idx++, anim, null, null, cl.immediateLeader, followers[0] || null);
 
   if (followers.length > 0)
-    h += '<div class="section-label' + (anim ? ' fade-in' : '') + '" style="padding-top:4px">↓ Behind · ' + followers.length + '</div>';
+    h += '<div class="section-label' + (anim ? ' fade-in' : '') + '">↓ Behind · ' + followers.length + '</div>';
 
   followers.forEach((bus, i) => {
     const label = i === 0 ? 'FOLLOWING BUS' : 'FOLLOWING BUS +' + (i + 1);
     const hw = i === 0 && !bus._isLayover && !you._isLayover
       ? (you.next_stop_sequence || 0) - (bus.next_stop_sequence || 0) : null;
-    h += buildNode(bus, 'following', label, idx++, anim, null, hw);
+    const aL = i === 0 ? you : followers[i - 1];
+    const aF = i < followers.length - 1 ? followers[i + 1] : null;
+    h += buildNode(bus, 'following', label, idx++, anim, null, hw, aL, aF);
   });
 
   return h + '</div></div>';
@@ -585,12 +606,16 @@ function buildAllBuses(merged, anim) {
   Object.keys(dirs).sort().forEach(dir => {
     const buses = dirs[dir].sort((a, b) => (b.next_stop_sequence || 0) - (a.next_stop_sequence || 0));
     h += '<div class="section-label' + (anim ? ' fade-in' : '') + '">' + dirShort(dir) + ' · ' + buses.length + ' bus' + (buses.length !== 1 ? 'es' : '') + '</div>';
-    buses.forEach(bus => { h += buildNode(bus, bus._isLayover ? 'layover' : 'other', bus._isLayover ? 'AT TERMINAL' : 'BUS', idx++, anim, null, null); });
+    buses.forEach((bus, i) => {
+      const aL = i > 0 ? buses[i - 1] : null;
+      const aF = i < buses.length - 1 ? buses[i + 1] : null;
+      h += buildNode(bus, bus._isLayover ? 'layover' : 'other', bus._isLayover ? 'AT TERMINAL' : 'BUS', idx++, anim, null, null, aL, aF);
+    });
   });
   return h + '</div></div>';
 }
 
-function buildNode(bus, role, label, idx, anim, leaderHw, followerHw) {
+function buildNode(bus, role, label, idx, anim, leaderHw, followerHw, adjLeader, adjFollower) {
   const late = parseInt(bus.late) || 0;
   let lateClass, lateText;
   if (late === 0)         { lateClass = 'ontime'; lateText = 'On Time'; }
@@ -610,27 +635,31 @@ function buildNode(bus, role, label, idx, anim, leaderHw, followerHw) {
   let h = '<div class="bus-node ' + nodeRole + (anim ? ' fade-in' : '') + '" style="animation-delay:' + (idx * 0.02) + 's">';
   h += '<div class="node-card">';
 
-  h += '<div class="node-row1">';
-  h += '<span class="role-tag ' + nodeRole + '">' + esc(label) + '</span>';
-  h += '<span class="dir-tag">' + dir + '</span>';
-  h += '<span class="block-num">' + esc(String(blk)) + '</span>';
-  if (runInfo) {
-    const isMob = navigator.maxTouchPoints > 0;
-    const padUrl = (isMob ? runInfo.mob : runInfo.pc) || runInfo.mob || runInfo.pc;
-    if (padUrl) {
-      h += '<a class="run-tag" href="' + esc(padUrl) + '" target="_blank" rel="noopener">Run #: ' + esc(String(runInfo.runno)) + '</a>';
-    } else {
-      h += '<span class="run-tag">Run #: ' + esc(String(runInfo.runno)) + '</span>';
-    }
+  if (adjLeader) {
+    const lBlk = adjLeader.BlockID || adjLeader.label || '—';
+    const lVid  = adjLeader.VehicleID || adjLeader.label || '—';
+    h += '<div class="neighbor-item leader-n"><span class="neighbor-label">Leader</span>';
+    h += '<span class="neighbor-blk">' + esc(String(lBlk)) + '</span>';
+    h += '<span class="neighbor-bus">Bus# ' + esc(String(lVid)) + '</span></div>';
   }
+
+  h += '<div class="node-row1">';
+  h += '<span class="block-num">' + esc(String(blk)) + '</span>';
   h += '<span class="vehicle-num">' + ICONS.bus + ' ' + esc(String(vid)) + '</span>';
   h += '</div>';
+
+  if (adjFollower) {
+    const fBlk = adjFollower.BlockID || adjFollower.label || '—';
+    const fVid  = adjFollower.VehicleID || adjFollower.label || '—';
+    h += '<div class="neighbor-item follower-n"><span class="neighbor-label">Follower</span>';
+    h += '<span class="neighbor-blk">' + esc(String(fBlk)) + '</span>';
+    h += '<span class="neighbor-bus">Bus# ' + esc(String(fVid)) + '</span></div>';
+  }
 
   if (!isLay) {
     h += '<div class="node-row2">';
     h += '<span class="late-tag ' + lateClass + '">' + lateText + '</span>';
     if (seat.show) h += '<span class="seat-tag ' + seat.c + '">' + ICONS.seat + ' ' + seat.t + '</span>';
-    if (stop) h += '<span class="stop-name">→ ' + esc(stop) + '</span>';
     h += '</div>';
   }
 
@@ -645,6 +674,24 @@ function buildNode(bus, role, label, idx, anim, leaderHw, followerHw) {
     h += '<div class="layover-row"><span class="terminal-badge">AT TERMINAL</span>';
     h += '<span>Layover:</span>';
     h += '<span class="layover-timer" data-layover-since="' + (bus._layoverSince || 0) + '">' + dur + '</span></div>';
+    const pullOff = runInfo && runInfo.pullOff ? runInfo.pullOff : null;
+    h += '<div class="pulloff-row"><span class="terminal-badge">PULL OFF</span>';
+    h += '<span class="pulloff-time">' + (pullOff ? esc(pullOff) : '—') + '</span></div>';
+  }
+
+  if (stop || runInfo) {
+    h += '<div class="node-bottom">';
+    if (stop && !isLay) h += '<span class="stop-name">→ ' + esc(stop) + '</span>';
+    if (runInfo) {
+      const isMob = navigator.maxTouchPoints > 0;
+      const padUrl = (isMob ? runInfo.mob : runInfo.pc) || runInfo.mob || runInfo.pc;
+      if (padUrl) {
+        h += '<a class="run-tag" href="' + esc(padUrl) + '" target="_blank" rel="noopener">Run #: ' + esc(String(runInfo.runno)) + '</a>';
+      } else {
+        h += '<span class="run-tag">Run #: ' + esc(String(runInfo.runno)) + '</span>';
+      }
+    }
+    h += '</div>';
   }
 
   return h + '</div></div>';
