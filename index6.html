@@ -144,6 +144,8 @@ body{min-height:100%;background:var(--bg);font-family:'Inter',-apple-system,syst
 .sched-leader-blk{font-size:13px;font-weight:800;color:var(--text)}
 .sched-leader-bus{font-size:12px;font-weight:600;color:var(--text-dim)}
 .sched-leader-missing{font-size:11px;font-weight:700;padding:2px 7px;border-radius:4px;background:var(--red-dim);color:var(--red);letter-spacing:.03em}
+.sched-leader-passed{font-size:11px;font-weight:700;padding:2px 7px;border-radius:4px;background:var(--orange-dim);color:var(--orange);letter-spacing:.03em}
+.not-tracking-tag{font-size:13px;font-weight:700;padding:3px 9px;border-radius:5px;background:var(--orange-dim);color:var(--orange)}
 
 /* BOTTOM ROW (location + run#) */
 .node-bottom{display:flex;align-items:center;gap:7px;margin-top:7px;padding-top:7px;border-top:1px solid var(--border)}
@@ -256,9 +258,10 @@ const MIN_SEEN           = 1;
 const LATE_BAD           = 6;
 
 const API = {
-  tv:      r => `https://www3.septa.org/api/TransitView/index.php?route=${encodeURIComponent(r)}`,
-  alerts:  r => `https://www3.septa.org/api/Alerts/index.php?routes=bus_route_${encodeURIComponent(r)}`,
-  detours: r => `https://www3.septa.org/api/BusDetours/${encodeURIComponent(r)}`,
+  tv:        r => `https://www3.septa.org/api/TransitView/index.php?route=${encodeURIComponent(r)}`,
+  alerts:    r => `https://www3.septa.org/api/Alerts/index.php?routes=bus_route_${encodeURIComponent(r)}`,
+  detours:   r => `https://www3.septa.org/api/BusDetours/${encodeURIComponent(r)}`,
+  schedules: r => `https://www3.septa.org/api/BusSchedules/index.php?route=${encodeURIComponent(r)}`,
 };
 const SCHED_BASE = 'https://deenersin-png.github.io/septa-scheduler/data';
 
@@ -266,7 +269,7 @@ const SCHED_BASE = 'https://deenersin-png.github.io/septa-scheduler/data';
 const state = { route: '', block: '', status: 'idle', lastUpdate: null };
 
 // ── SCHEDULE DATA ────────────────────────────────────────────
-const sched = { blockToRun: new Map(), loaded: false, loading: false };
+const sched = { blockToRun: new Map(), loaded: false, loading: false, schedOrderByDir: new Map() };
 
 function getDayType() {
   const d = new Date().getDay();
@@ -324,25 +327,72 @@ async function loadScheduleData() {
       for (const row of parseCSV(schedText)) {
         if (!row.runno) continue;
         const pad = runToPad.get(String(row.runno)) || {};
-        const runBlocks = [];
         for (let i = 1; i <= 10; i++) {
           const blk = (row['b' + i] || '').trim();
-          if (blk && blk !== '0') runBlocks.push(blk);
+          if (blk && blk !== '0') {
+            sched.blockToRun.set(blk, { runno: row.runno, mob: pad.mob || '', pc: pad.pc || '' });
+          }
         }
-        runBlocks.forEach((blk, idx) => {
-          sched.blockToRun.set(blk, {
-            runno:         row.runno,
-            mob:           pad.mob || '',
-            pc:            pad.pc  || '',
-            schedLeader:   idx > 0                    ? runBlocks[idx - 1] : null,
-            schedFollower: idx < runBlocks.length - 1 ? runBlocks[idx + 1] : null,
-          });
-        });
       }
     }));
     sched.loaded = true;
   } catch(e) { console.warn('Schedule load failed:', e); }
   sched.loading = false;
+}
+
+async function loadBusSchedules(route) {
+  sched.schedOrderByDir = new Map();
+  try {
+    const data = await fetchWithTimeout(API.schedules(route));
+    console.log('[BusSchedules] raw response:', data);
+    // Response is an object keyed by stop_id; each value is an array of departures.
+    // We need to find BlockID (or block_id) and direction fields.
+    const byDir = new Map();
+    const pushEntry = (blockId, direction, timeStr) => {
+      if (!blockId || blockId === '0') return;
+      const dir = (direction || '').toLowerCase();
+      if (!byDir.has(dir)) byDir.set(dir, []);
+      byDir.get(dir).push({ blockId: String(blockId), time: timeStr || '' });
+    };
+    if (Array.isArray(data)) {
+      for (const entry of data) {
+        const blk = entry.BlockID || entry.block_id || entry.blockid || '';
+        const dir = entry.Direction || entry.direction || '';
+        const t   = entry.ScheduledDepartureTime || entry.scheduled_departure_time || entry.date_time || '';
+        pushEntry(blk, dir, t);
+      }
+    } else if (data && typeof data === 'object') {
+      for (const stopEntries of Object.values(data)) {
+        const arr = Array.isArray(stopEntries) ? stopEntries : [];
+        for (const entry of arr) {
+          const blk = entry.BlockID || entry.block_id || entry.blockid || '';
+          const dir = entry.Direction || entry.direction || '';
+          const t   = entry.ScheduledDepartureTime || entry.scheduled_departure_time || entry.date_time || '';
+          pushEntry(blk, dir, t);
+        }
+      }
+    }
+    for (const [dir, entries] of byDir) {
+      entries.sort((a, b) => a.time.localeCompare(b.time));
+      // deduplicate by blockId, keep first occurrence (earliest departure)
+      const seen = new Set();
+      const ordered = [];
+      for (const e of entries) {
+        if (!seen.has(e.blockId)) { seen.add(e.blockId); ordered.push(e.blockId); }
+      }
+      sched.schedOrderByDir.set(dir, ordered);
+    }
+    console.log('[BusSchedules] schedOrderByDir:', Object.fromEntries(sched.schedOrderByDir));
+  } catch(e) {
+    console.warn('[BusSchedules] load failed:', e);
+  }
+}
+
+function getSchedLeader(block, direction) {
+  const dir = (direction || '').toLowerCase();
+  const order = sched.schedOrderByDir.get(dir) || [];
+  const idx = order.indexOf(String(block));
+  return idx > 0 ? order[idx - 1] : null;
 }
 
 // ── BUS CACHE ────────────────────────────────────────────────
@@ -436,11 +486,14 @@ function parseTVData(raw) {
       if (Array.isArray(v)) v.forEach(b => b && typeof b === 'object' && buses.push(b));
     }
   }
-  return buses.filter(b => {
+  return buses.map(b => {
+    const offNum = parseFloat(String(b.Offset || ''));
+    if (!isNaN(offNum) && Math.abs(offNum) >= 500) b._notTracking = true;
+    return b;
+  }).filter(b => {
     const ts  = parseInt(b.timestamp) || 0;
     const off = String(b.Offset || '');
-    const offNum = parseFloat(off);
-    if (!isNaN(offNum) && Math.abs(offNum) >= 500) return false;
+    if (b._notTracking && !parseInt(b.next_stop_sequence)) return false;
     return ts > 1000000 || (off && off !== '999');
   });
 }
@@ -506,11 +559,22 @@ function classify(merged, block) {
   same.sort((a, b) => (b.next_stop_sequence || 0) - (a.next_stop_sequence || 0));
 
   const myPos = same.findIndex(b => String(b.BlockID || '') === block);
-  const myRunInfo = sched.blockToRun.get(block);
-  const schedLeaderBlk = myRunInfo ? myRunInfo.schedLeader : null;
+
+  const schedLeaderBlk = getSchedLeader(block, dir);
   const schedLeaderBus = schedLeaderBlk
     ? merged.find(b => String(b.BlockID || '') === schedLeaderBlk) || null
     : null;
+  let schedLeaderState = null;
+  if (schedLeaderBlk) {
+    if (!schedLeaderBus) {
+      schedLeaderState = 'missing';
+    } else {
+      const mySeq = parseInt(same[myPos].next_stop_sequence) || 0;
+      const lSeq  = parseInt(schedLeaderBus.next_stop_sequence) || 0;
+      schedLeaderState = lSeq >= mySeq ? 'ahead' : 'behind';
+    }
+  }
+
   return {
     found: true, direction: dir,
     leaders:         same.slice(0, myPos),
@@ -519,6 +583,7 @@ function classify(merged, block) {
     immediateLeader: myPos > 0 ? same[myPos - 1] : null,
     schedLeaderBlk,
     schedLeaderBus,
+    schedLeaderState,
   };
 }
 
@@ -567,16 +632,16 @@ function renderMain(merged, block, route) {
 
   // Leader status banner
   const ldr = cl.immediateLeader;
-  const schedBlk = cl.schedLeaderBlk;
-  const schedBus  = cl.schedLeaderBus;
-  const schedMissing = schedBlk && !schedBus;
-  const schedDiffers = schedBlk && ldr && String(ldr.BlockID || '') !== schedBlk;
+  const schedBlk   = cl.schedLeaderBlk;
+  const schedBus   = cl.schedLeaderBus;
+  const schedState = cl.schedLeaderState; // 'missing' | 'behind' | 'ahead' | null
 
-  if (schedMissing) {
+  if (schedState === 'missing') {
     const actualPart = ldr ? ' — actual: Bus V#' + esc(String(ldr.VehicleID || ldr.BlockID || '?')) : ' — no actual leader visible';
     showBanner('warn', '⚠', 'Sched leader Block ' + esc(schedBlk) + ' NOT IN SERVICE' + actualPart);
-  } else if (schedDiffers) {
-    showBanner('info', 'ℹ', 'Sched leader Block ' + esc(schedBlk) + ' — another bus is physically ahead');
+  } else if (schedState === 'behind') {
+    const sVid = schedBus ? (schedBus.VehicleID || schedBus.BlockID || '?') : '?';
+    showBanner('warn', '⚠', 'Sched leader Block ' + esc(schedBlk) + ' passed — Bus V#' + esc(String(sVid)) + ' is behind you');
   } else if (!ldr) {
     showBanner('warn', '⚠', 'You are first ' + dirShort(cl.direction) + ' — no leading bus');
   } else if (ldr._isLayover) {
@@ -615,7 +680,7 @@ function buildFoundMode(cl, anim) {
   if (leaders.length > 0)
     h += '<div class="section-label' + (anim ? ' fade-in' : '') + '">● Selected Bus</div>';
 
-  h += buildNode(you, 'you', 'Selected Bus', idx++, anim, null, null, cl.immediateLeader, followers[0] || null, { schedLeaderBlk: cl.schedLeaderBlk, schedLeaderBus: cl.schedLeaderBus });
+  h += buildNode(you, 'you', 'Selected Bus', idx++, anim, null, null, cl.immediateLeader, followers[0] || null, { schedLeaderBlk: cl.schedLeaderBlk, schedLeaderBus: cl.schedLeaderBus, schedLeaderState: cl.schedLeaderState });
 
   if (followers.length > 0)
     h += '<div class="section-label' + (anim ? ' fade-in' : '') + '">↓ Behind · ' + followers.length + '</div>';
@@ -692,7 +757,11 @@ function buildNode(bus, role, label, idx, anim, leaderHw, followerHw, adjLeader,
 
   if (!isLay) {
     h += '<div class="node-row2">';
-    h += '<span class="late-tag ' + lateClass + '">' + lateText + '</span>';
+    if (bus._notTracking) {
+      h += '<span class="not-tracking-tag">NOT TRACKING</span>';
+    } else {
+      h += '<span class="late-tag ' + lateClass + '">' + lateText + '</span>';
+    }
     if (seat.show) h += '<span class="seat-tag ' + seat.c + '">' + ICONS.seat + ' ' + seat.t + '</span>';
     h += '</div>';
   }
@@ -713,22 +782,21 @@ function buildNode(bus, role, label, idx, anim, leaderHw, followerHw, adjLeader,
     h += '<span class="pulloff-time">' + (pullOff ? esc(pullOff) : '—') + '</span></div>';
   }
 
-  if (schedInfo && schedInfo.schedLeaderBlk) {
-    const sBlk = schedInfo.schedLeaderBlk;
-    const actualBlk = adjLeader ? String(adjLeader.BlockID || '') : null;
-    if (actualBlk !== sBlk) {
-      const present = !!schedInfo.schedLeaderBus;
-      const sVid = present ? (schedInfo.schedLeaderBus.VehicleID || schedInfo.schedLeaderBus.BlockID || '—') : null;
-      h += '<div class="sched-leader-row">';
-      h += '<span class="sched-leader-label">SCHED LEADER</span>';
-      h += '<span class="sched-leader-blk">' + esc(sBlk) + '</span>';
-      if (present) {
-        h += '<span class="sched-leader-bus">Bus# ' + esc(String(sVid)) + '</span>';
-      } else {
-        h += '<span class="sched-leader-missing">NOT IN SERVICE</span>';
-      }
-      h += '</div>';
+  if (schedInfo && schedInfo.schedLeaderBlk && schedInfo.schedLeaderState !== 'ahead') {
+    const sBlk   = schedInfo.schedLeaderBlk;
+    const sState = schedInfo.schedLeaderState; // 'missing' | 'behind'
+    const sVid   = schedInfo.schedLeaderBus
+      ? (schedInfo.schedLeaderBus.VehicleID || schedInfo.schedLeaderBus.BlockID || '—') : null;
+    h += '<div class="sched-leader-row">';
+    h += '<span class="sched-leader-label">SCHED LEADER</span>';
+    h += '<span class="sched-leader-blk">' + esc(sBlk) + '</span>';
+    if (sState === 'missing') {
+      h += '<span class="sched-leader-missing">NOT IN SERVICE</span>';
+    } else {
+      h += '<span class="sched-leader-passed">PASSED</span>';
+      if (sVid) h += '<span class="sched-leader-bus">Bus# ' + esc(String(sVid)) + '</span>';
     }
+    h += '</div>';
   }
 
   if (stop || runInfo) {
@@ -857,6 +925,7 @@ async function onRouteChange() {
       safeGet(API.alerts(state.route)),
       safeGet(API.detours(state.route)),
     ]);
+    loadBusSchedules(state.route); // fire-and-forget: updates sched.schedOrderByDir async
 
     if (tvRes.status === 'rejected') throw tvRes.reason;
 
