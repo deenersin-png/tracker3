@@ -245,12 +245,31 @@ a.run-tag:active{opacity:.7}
 const ROUTES = [
   '1','2','3','4','5','6','7','8','9','10','11','12','13','14','15','16','17','18','19','20',
   '21','22','23','24','25','26','27','28','29','30','31','32','33','34','35','36','37','38','39','40',
-  '42','43','44','45','46','47','48','50','52','53','54','55','56','57','58','59','60','61','62','64',
-  '65','66','67','68','70','73','75','77','78','79','80','84','88','89','90','91','92','93','94','95',
-  '96','97','98','99','100','101','102','103','104','105','106','107','108','109','110','111','112',
-  '113','114','115','117','118','119','120','123','124','125','126','127','128','129','130','131','132',
-  '133','139','150','201','204','205','206','310','G','H','K','L','LUCY','BSO','MFO'
+  '41','42','43','44','45','46','47','48','50','51','52','53','54','55','56','57','58','59','60','61',
+  '62','63','64','65','66','67','68','70','71','73','75','77','78','79','80','81','82','84','88','89',
+  '90','91','92','93','94','95','96','97','98','99','100','101','102','103','104','105','106','107',
+  '108','109','110','111','112','113','114','115','117','118','119','120','123','124','125','126',
+  '127','128','129','130','131','132','133','139','150','201','204','205','206','310',
+  'T1','T2','T3','T4','T5','G','H','K','L','LUCY','BSO','MFO'
 ];
+
+const ROUTE_ALIASES = {
+  '10': ['10','T1'],   'T1': ['T1','10'],
+  '11': ['11','T4'],   'T4': ['T4','11'],
+  '13': ['13','T3'],   'T3': ['T3','13'],
+  '15': ['15','G'],
+  '34': ['34','T2'],   'T2': ['T2','34'],
+  '36': ['36','T5'],   'T5': ['T5','36'],
+  'G':  ['G','63'],    '63': ['63','G'],
+  'H':  ['H','71'],    '71': ['71','H'],
+  'J':  ['J','41'],    '41': ['41','J'],
+  'L':  ['L','51'],    '51': ['51','L'],
+  'R':  ['R','82'],    '82': ['82','R'],
+  'XH': ['XH','81'],   '81': ['81','XH'],
+};
+function getAliases(route) {
+  return ROUTE_ALIASES[route] || [route];
+}
 const REFRESH_MS         = 30000;
 const FETCH_TIMEOUT_MS   = 8000;
 const LAYOVER_TIMEOUT_MS = 45 * 60000;
@@ -515,10 +534,23 @@ const TV_ENDPOINTS = [
   r => `https://www3.septa.org/beta/TransitView/?route=${encodeURIComponent(r)}&callback=`,
 ];
 
-function fetchTV(route) {
+function fetchTVOnce(route) {
   return new Promise((resolve, reject) => {
     tryJSONP(route, TV_ENDPOINTS, 0, resolve, reject);
   });
+}
+
+async function fetchTV(route) {
+  const aliases = getAliases(route);
+  let lastErr = null;
+  for (const name of aliases) {
+    try {
+      const buses = await fetchTVOnce(name);
+      if (buses && buses.length > 0) return buses;
+    } catch (e) { lastErr = e; }
+  }
+  if (lastErr) throw lastErr;
+  return [];
 }
 
 function tryJSONP(route, endpoints, idx, resolve, reject) {
@@ -556,6 +588,14 @@ function tryJSONP(route, endpoints, idx, resolve, reject) {
 async function safeGet(url) {
   try { const d = await fetchWithTimeout(url); return Array.isArray(d) ? d : []; }
   catch { return []; }
+}
+
+async function safeGetWithAliases(urlBuilder, route) {
+  for (const name of getAliases(route)) {
+    const data = await safeGet(urlBuilder(name));
+    if (data.length > 0) return data;
+  }
+  return [];
 }
 
 // ── CLASSIFY ─────────────────────────────────────────────────
@@ -913,8 +953,8 @@ async function onRouteChange() {
   try {
     const [tvRes, alertsRes, detoursRes] = await Promise.allSettled([
       fetchTV(state.route),
-      safeGet(API.alerts(state.route)),
-      safeGet(API.detours(state.route)),
+      safeGetWithAliases(API.alerts,  state.route),
+      safeGetWithAliases(API.detours, state.route),
     ]);
 
     if (tvRes.status === 'rejected') throw tvRes.reason;
